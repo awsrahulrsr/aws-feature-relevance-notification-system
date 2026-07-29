@@ -130,7 +130,7 @@ def lambda_handler(event, context):
 
 
 def retrieve_kb_context(query, workload_id):
-    """Retrieve relevant context from Bedrock Knowledge Base."""
+    """Retrieve relevant context from Bedrock Knowledge Base, filtered by workload_id."""
     if not KNOWLEDGE_BASE_ID:
         return ""
 
@@ -140,7 +140,13 @@ def retrieve_kb_context(query, workload_id):
             retrievalQuery={'text': query},
             retrievalConfiguration={
                 'vectorSearchConfiguration': {
-                    'numberOfResults': 3
+                    'numberOfResults': 3,
+                    'filter': {
+                        'equals': {
+                            'key': 'workload_id',
+                            'value': workload_id
+                        }
+                    }
                 }
             }
         )
