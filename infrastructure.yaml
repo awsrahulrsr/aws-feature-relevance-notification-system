@@ -1,0 +1,377 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AWS Feature Relevance Notification System - PoC
+  Scores AWS What's New announcements against customer workload profiles
+  using Amazon Bedrock (Claude) and delivers enriched Slack notifications.
+
+Parameters:
+  SlackWebhookUrl:
+    Type: String
+    Description: Slack Incoming Webhook URL for notifications
+    NoEcho: true
+    Default: ''
+
+  BedrockModelId:
+    Type: String
+    Default: us.anthropic.claude-sonnet-4-6
+    Description: Bedrock model ID for relevance scoring
+
+  KnowledgeBaseId:
+    Type: String
+    Default: ''
+    Description: Bedrock Knowledge Base ID (optional - leave empty for free-text only mode)
+
+Resources:
+
+  # ============================================================
+  # DynamoDB Tables
+  # ============================================================
+
+  WorkloadProfilesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub WorkloadProfiles-${AWS::StackName}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: workload_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: workload_id
+          KeyType: HASH
+
+  AnnouncementStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub AnnouncementState-${AWS::StackName}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: announcement_url
+          AttributeType: S
+      KeySchema:
+        - AttributeName: announcement_url
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ============================================================
+  # Secrets Manager
+  # ============================================================
+
+  SlackWebhookSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub slack-webhook-${AWS::StackName}
+      Description: Slack webhook URL for feature relevance notifications
+      SecretString: !Sub '{"webhook_url":"${SlackWebhookUrl}"}'
+
+  # ============================================================
+  # IAM Roles
+  # ============================================================
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub feature-relevance-lambda-${AWS::StackName}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:DeleteItem
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt WorkloadProfilesTable.Arn
+                  - !GetAtt AnnouncementStateTable.Arn
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - bedrock:Retrieve
+                  - bedrock:RetrieveAndGenerate
+                Resource: '*'
+        - PolicyName: StepFunctionsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:FeatureRelevance-${AWS::StackName}
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref SlackWebhookSecret
+
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub feature-relevance-sfn-${AWS::StackName}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt RelevanceScorerFunction.Arn
+                  - !GetAtt SlackNotificationFunction.Arn
+
+  # ============================================================
+  # Lambda Functions
+  # ============================================================
+
+  RSSIngestionFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub RSSIngestion-${AWS::StackName}
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.12
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          STATE_TABLE: !Ref AnnouncementStateTable
+          PROFILES_TABLE: !Ref WorkloadProfilesTable
+          STATE_MACHINE_ARN: !GetAtt FeatureRelevanceStateMachine.Arn
+      Code:
+        ZipFile: |
+          # Placeholder - deploy actual code via update
+          def lambda_handler(event, context):
+              return {'statusCode': 200}
+
+  RelevanceScorerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub RelevanceScorer-${AWS::StackName}
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          MODEL_ID: !Ref BedrockModelId
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+      Code:
+        ZipFile: |
+          # Placeholder - deploy actual code via update
+          def lambda_handler(event, context):
+              return {'statusCode': 200}
+
+  SlackNotificationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub SlackNotification-${AWS::StackName}
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          SLACK_SECRET_ARN: !Ref SlackWebhookSecret
+      Code:
+        ZipFile: |
+          # Placeholder - deploy actual code via update
+          def lambda_handler(event, context):
+              return {'statusCode': 200}
+
+  WorkloadManagerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub WorkloadManager-${AWS::StackName}
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          PROFILES_TABLE: !Ref WorkloadProfilesTable
+      Code:
+        ZipFile: |
+          # Placeholder - deploy actual code via update
+          def lambda_handler(event, context):
+              return {'statusCode': 200}
+
+  # ============================================================
+  # Step Functions State Machine
+  # ============================================================
+
+  FeatureRelevanceStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub FeatureRelevance-${AWS::StackName}
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "AWS Feature Relevance Scoring Pipeline",
+          "StartAt": "ScoreRelevance",
+          "States": {
+            "ScoreRelevance": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${RelevanceScorerFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "ResultSelector": {
+                "scoring.$": "$.Payload"
+              },
+              "ResultPath": "$.scoringResult",
+              "Next": "CheckRelevanceThreshold",
+              "Retry": [
+                {
+                  "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "ScoringFailed",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "CheckRelevanceThreshold": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.scoringResult.scoring.relevance_score",
+                  "NumericGreaterThanEquals": 40,
+                  "Next": "PrepareNotification"
+                }
+              ],
+              "Default": "BelowThreshold"
+            },
+            "PrepareNotification": {
+              "Type": "Pass",
+              "Parameters": {
+                "announcement.$": "$.announcement",
+                "scoring.$": "$.scoringResult.scoring"
+              },
+              "Next": "SendSlackNotification"
+            },
+            "SendSlackNotification": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${SlackNotificationFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "ResultPath": "$.notificationResult",
+              "End": true,
+              "Retry": [
+                {
+                  "ErrorEquals": ["Lambda.ServiceException"],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2
+                }
+              ]
+            },
+            "BelowThreshold": {
+              "Type": "Pass",
+              "Result": {"status": "skipped", "reason": "Score below threshold"},
+              "End": true
+            },
+            "ScoringFailed": {
+              "Type": "Pass",
+              "Result": {"status": "error", "reason": "Scoring failed"},
+              "End": true
+            }
+          }
+        }
+
+  # ============================================================
+  # EventBridge Schedule (RSS Polling every 10 minutes)
+  # ============================================================
+
+  RSSPollingSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub RSSPolling-${AWS::StackName}
+      Description: Poll AWS What's New RSS feed every 10 minutes
+      ScheduleExpression: 'rate(10 minutes)'
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt RSSIngestionFunction.Arn
+          Id: RSSIngestionTarget
+
+  RSSIngestionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RSSIngestionFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt RSSPollingSchedule.Arn
+
+# ============================================================
+# Outputs
+# ============================================================
+
+Outputs:
+  StateMachineArn:
+    Value: !GetAtt FeatureRelevanceStateMachine.Arn
+    Description: Step Functions State Machine ARN
+
+  RSSIngestionFunctionName:
+    Value: !Ref RSSIngestionFunction
+    Description: RSS Ingestion Lambda function name
+
+  RelevanceScorerFunctionName:
+    Value: !Ref RelevanceScorerFunction
+    Description: Relevance Scorer Lambda function name
+
+  SlackNotificationFunctionName:
+    Value: !Ref SlackNotificationFunction
+    Description: Slack Notification Lambda function name
+
+  WorkloadManagerFunctionName:
+    Value: !Ref WorkloadManagerFunction
+    Description: Workload Manager Lambda function name
+
+  WorkloadProfilesTableName:
+    Value: !Ref WorkloadProfilesTable
+    Description: DynamoDB table for workload profiles
+
+  SlackSecretArn:
+    Value: !Ref SlackWebhookSecret
+    Description: Secrets Manager ARN for Slack webhook
