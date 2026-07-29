@@ -149,7 +149,7 @@ aws cloudformation deploy \
   --template-file infrastructure.yaml \
   --stack-name feature-relevance-poc \
   --capabilities CAPABILITY_NAMED_IAM \
-  --region us-west-2 \
+  --region <YOUR_REGION> \
   --parameter-overrides \
     SlackWebhookUrl="https://hooks.slack.com/services/YOUR/WEBHOOK/URL" \
     BedrockModelId="us.anthropic.claude-sonnet-4-6" \
@@ -175,7 +175,7 @@ zip -j /tmp/rss-ingestion.zip index.py
 aws lambda update-function-code \
   --function-name RSSIngestion-feature-relevance-poc \
   --zip-file fileb:///tmp/rss-ingestion.zip \
-  --region us-west-2
+  --region <YOUR_REGION>
 
 # Relevance Scorer
 cd ../relevance-scorer
@@ -183,7 +183,7 @@ zip -j /tmp/relevance-scorer.zip index.py
 aws lambda update-function-code \
   --function-name RelevanceScorer-feature-relevance-poc \
   --zip-file fileb:///tmp/relevance-scorer.zip \
-  --region us-west-2
+  --region <YOUR_REGION>
 
 # Slack Notification
 cd ../slack-notification
@@ -191,7 +191,7 @@ zip -j /tmp/slack-notification.zip index.py
 aws lambda update-function-code \
   --function-name SlackNotification-feature-relevance-poc \
   --zip-file fileb:///tmp/slack-notification.zip \
-  --region us-west-2
+  --region <YOUR_REGION>
 
 # Workload Manager
 cd ../workload-manager
@@ -199,7 +199,7 @@ zip -j /tmp/workload-manager.zip index.py
 aws lambda update-function-code \
   --function-name WorkloadManager-feature-relevance-poc \
   --zip-file fileb:///tmp/workload-manager.zip \
-  --region us-west-2
+  --region <YOUR_REGION>
 ```
 
 ### Step 3: Set Up Knowledge Base (Optional)
@@ -208,7 +208,7 @@ If you want deeper scoring using architecture documents:
 
 1. **Create an S3 bucket** for documents:
 ```bash
-aws s3 mb s3://your-kb-bucket-name --region us-west-2
+aws s3 mb s3://your-kb-bucket-name --region <YOUR_REGION>
 ```
 
 2. **Upload documents** with metadata files:
@@ -234,7 +234,7 @@ Each document needs a companion `.metadata.json` file:
 aws lambda update-function-configuration \
   --function-name RelevanceScorer-feature-relevance-poc \
   --environment '{"Variables":{"MODEL_ID":"us.anthropic.claude-sonnet-4-6","KNOWLEDGE_BASE_ID":"YOUR_KB_ID"}}' \
-  --region us-west-2
+  --region <YOUR_REGION>
 ```
 
 ### Step 4: Create Workload Profiles
@@ -259,7 +259,7 @@ aws lambda invoke --function-name WorkloadManager-feature-relevance-poc \
       "key_services": ["Amazon EKS", "Amazon DynamoDB", "Amazon S3"]
     }
   }' \
-  --region us-west-2 /tmp/output.json
+  --region <YOUR_REGION> /tmp/output.json
 ```
 
 **Key fields:**
@@ -281,7 +281,7 @@ Trigger a test with a sample announcement:
 aws lambda invoke --function-name RSSIngestion-feature-relevance-poc \
   --cli-binary-format raw-in-base64-out \
   --payload '{"test_mode": true}' \
-  --region us-west-2 /tmp/test.json && cat /tmp/test.json
+  --region <YOUR_REGION> /tmp/test.json && cat /tmp/test.json
 ```
 
 Or trigger with a specific announcement:
@@ -299,7 +299,7 @@ aws lambda invoke --function-name RSSIngestion-feature-relevance-poc \
       "categories": ["Amazon Elastic Kubernetes Service", "Compute"]
     }
   }' \
-  --region us-west-2 /tmp/test.json
+  --region <YOUR_REGION> /tmp/test.json
 ```
 
 ### Step 6: Verify
@@ -308,7 +308,7 @@ aws lambda invoke --function-name RSSIngestion-feature-relevance-poc \
 - Check Slack channel for the notification
 - Check CloudWatch Logs for Lambda execution details:
 ```bash
-aws logs tail /aws/lambda/RelevanceScorer-feature-relevance-poc --follow --region us-west-2
+aws logs tail /aws/lambda/RelevanceScorer-feature-relevance-poc --follow --region <YOUR_REGION>
 ```
 
 ---
@@ -323,7 +323,7 @@ The EventBridge schedule is set to `rate(1 day)`. To change:
 aws events put-rule \
   --name RSSPolling-feature-relevance-poc \
   --schedule-expression 'rate(12 hours)' \
-  --region us-west-2
+  --region <YOUR_REGION>
 ```
 
 ### Adjusting the Relevance Threshold
@@ -340,7 +340,7 @@ Edit the `SERVICE_KEYWORDS` dictionary in `lambdas/rss-ingestion/index.py` to ad
 aws secretsmanager put-secret-value \
   --secret-id slack-webhook-feature-relevance-poc \
   --secret-string '{"webhook_url":"https://hooks.slack.com/services/NEW/WEBHOOK/URL"}' \
-  --region us-west-2
+  --region <YOUR_REGION>
 ```
 
 ---
@@ -361,23 +361,19 @@ Bedrock (Claude) accounts for 90-95% of total cost. All other services (Lambda, 
 
 ```bash
 # Delete CloudFormation stack
-aws cloudformation delete-stack --stack-name feature-relevance-poc --region us-west-2
+aws cloudformation delete-stack --stack-name feature-relevance-poc --region <YOUR_REGION>
 
 # Delete Knowledge Base (if created)
-aws bedrock-agent delete-knowledge-base --knowledge-base-id YOUR_KB_ID --region us-west-2
+aws bedrock-agent delete-knowledge-base --knowledge-base-id YOUR_KB_ID --region <YOUR_REGION>
 
 # Delete S3 bucket
 aws s3 rb s3://your-kb-bucket-name --force
 
 # Delete OpenSearch Serverless collection
-aws opensearchserverless delete-collection --id YOUR_COLLECTION_ID --region us-west-2
+aws opensearchserverless delete-collection --id YOUR_COLLECTION_ID --region <YOUR_REGION>
 ```
 
 ---
-
-## Region
-
-Deployed in **us-west-2** (Oregon).
 
 ## Model
 
