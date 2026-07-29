@@ -7,8 +7,9 @@ and triggers Step Functions for matched announcements.
 import boto3
 import json
 import os
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 import urllib.request
+import urllib.parse
 from datetime import datetime, timezone
 
 dynamodb = boto3.resource('dynamodb')
@@ -59,8 +60,12 @@ def lambda_handler(event, context):
 
     # Fetch and parse RSS feed
     try:
+        # Validate URL scheme before opening
+        parsed_url = urllib.parse.urlparse(RSS_URL)
+        if parsed_url.scheme not in ('https', 'http'):
+            raise ValueError(f"Invalid URL scheme: {parsed_url.scheme}")
         req = urllib.request.Request(RSS_URL, headers={'User-Agent': 'AWSFeatureRelevance/1.0'})
-        response = urllib.request.urlopen(req, timeout=30)
+        response = urllib.request.urlopen(req, timeout=30)  # nosec B310
         xml_content = response.read()
         root = ET.fromstring(xml_content)
     except Exception as e:

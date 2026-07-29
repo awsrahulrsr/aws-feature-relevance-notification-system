@@ -7,6 +7,7 @@ import boto3
 import json
 import os
 import urllib.request
+import urllib.parse
 
 secrets_client = boto3.client('secretsmanager')
 
@@ -53,12 +54,17 @@ def lambda_handler(event, context):
 
     # Send to Slack
     try:
+        # Validate webhook URL scheme
+        parsed_url = urllib.parse.urlparse(webhook_url)
+        if parsed_url.scheme != 'https':
+            print(f"ERROR: Invalid webhook URL scheme: {parsed_url.scheme}")
+            return {'statusCode': 400, 'error': 'Webhook URL must use HTTPS'}
         req = urllib.request.Request(
             webhook_url,
             data=json.dumps(slack_payload).encode('utf-8'),
             headers={'Content-Type': 'application/json'}
         )
-        response = urllib.request.urlopen(req, timeout=10)
+        response = urllib.request.urlopen(req, timeout=10)  # nosec B310
         print(f"Slack notification sent: {response.status}")
         return {'statusCode': 200, 'message': 'Notification sent'}
     except Exception as e:
