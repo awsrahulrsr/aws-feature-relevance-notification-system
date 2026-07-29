@@ -21,6 +21,9 @@ Parameters:
     Default: ''
     Description: Bedrock Knowledge Base ID (optional - leave empty for free-text only mode)
 
+Conditions:
+  HasKnowledgeBase: !Not [!Equals [!Ref KnowledgeBaseId, '']]
+
 Resources:
 
   # ============================================================
@@ -193,12 +196,17 @@ Resources:
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - bedrock:Retrieve
-                  - bedrock:RetrieveAndGenerate
-                Resource: '*'
+                Resource:
+                  - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+              - !If
+                - HasKnowledgeBase
+                - Effect: Allow
+                  Action:
+                    - bedrock:Retrieve
+                    - bedrock:RetrieveAndGenerate
+                  Resource: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
+                - !Ref AWS::NoValue
         - PolicyName: StepFunctionsAccess
           PolicyDocument:
             Version: '2012-10-17'
