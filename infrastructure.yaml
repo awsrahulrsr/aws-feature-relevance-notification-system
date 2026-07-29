@@ -41,20 +41,46 @@ Resources:
               AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
             Action: kms:*
             Resource: '*'
-          - Sid: AllowLambdaAndServices
+          - Sid: AllowDynamoDBEncryption
             Effect: Allow
             Principal:
-              Service:
-                - lambda.amazonaws.com
-                - dynamodb.amazonaws.com
-                - sqs.amazonaws.com
-                - secretsmanager.amazonaws.com
+              Service: dynamodb.amazonaws.com
             Action:
               - kms:Decrypt
               - kms:Encrypt
               - kms:GenerateDataKey*
               - kms:DescribeKey
+              - kms:CreateGrant
             Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: AllowSQSEncryption
+            Effect: Allow
+            Principal:
+              Service: sqs.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: AllowSecretsManagerEncryption
+            Effect: Allow
+            Principal:
+              Service: secretsmanager.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:Encrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+              - kms:CreateGrant
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
 
   EncryptionKeyAlias:
     Type: AWS::KMS::Alias
