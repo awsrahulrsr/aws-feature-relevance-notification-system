@@ -119,6 +119,8 @@ feature-relevance-poc/
 │   └── workload-manager/index.py      # Workload profile CRUD
 ├── step-functions/
 │   └── state-machine.json             # Step Functions ASL definition
+├── sam-app/
+│   └── template.yaml                 # AWS SAM template (alternative deployment)
 ├── sample-data/
 │   ├── workload-dxp.json              # Sample workload profile
 │   └── workload-creative-cloud.json   # Sample workload profile
@@ -135,14 +137,21 @@ feature-relevance-poc/
 
 ## Deployment Guide
 
+There are two deployment options:
+- **Option A: CloudFormation** — Manual Lambda code deployment, more control
+- **Option B: SAM (recommended)** — Automatic Lambda packaging, dependency management, simpler workflow
+
 ### Prerequisites
 
 - AWS CLI configured with appropriate credentials
 - An AWS account with Bedrock model access enabled (Claude Sonnet 4)
 - A Slack workspace with an Incoming Webhook configured
 - Python 3.12 (for diagram/doc generation scripts)
+- AWS SAM CLI (for Option B only — [install guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html))
 
-### Step 1: Deploy Infrastructure (CloudFormation)
+### Option A: CloudFormation Deployment
+
+#### Step 1: Deploy Infrastructure
 
 ```bash
 aws cloudformation deploy \
@@ -164,7 +173,7 @@ aws cloudformation deploy \
 | `BedrockModelId` | No | Bedrock model ID (default: `us.anthropic.claude-sonnet-4-6`) |
 | `KnowledgeBaseId` | No | Bedrock Knowledge Base ID. Leave empty to use free-text only mode |
 
-### Step 2: Deploy Lambda Code
+#### Step 2: Deploy Lambda Code
 
 The CloudFormation template creates placeholder Lambdas. Deploy the actual code:
 
@@ -202,7 +211,7 @@ aws lambda update-function-code \
   --region <YOUR_REGION>
 ```
 
-### Step 3: Set Up Knowledge Base (Optional)
+#### Step 3: Set Up Knowledge Base (Optional)
 
 If you want deeper scoring using architecture documents:
 
@@ -237,7 +246,7 @@ aws lambda update-function-configuration \
   --region <YOUR_REGION>
 ```
 
-### Step 4: Create Workload Profiles
+#### Step 4: Create Workload Profiles
 
 Add workload profiles using the Workload Manager Lambda:
 
@@ -273,7 +282,7 @@ aws lambda invoke --function-name WorkloadManager-feature-relevance-poc \
 | `account_ids` | AWS account IDs shown in notifications |
 | `pod_slack_channel` | Slack channel for notification routing |
 
-### Step 5: Test the Pipeline
+#### Step 5: Test the Pipeline
 
 Trigger a test with a sample announcement:
 
@@ -302,13 +311,62 @@ aws lambda invoke --function-name RSSIngestion-feature-relevance-poc \
   --region <YOUR_REGION> /tmp/test.json
 ```
 
-### Step 6: Verify
+#### Step 6: Verify
 
 - Check Step Functions console for execution status
 - Check Slack channel for the notification
 - Check CloudWatch Logs for Lambda execution details:
 ```bash
 aws logs tail /aws/lambda/RelevanceScorer-feature-relevance-poc --follow --region <YOUR_REGION>
+```
+
+---
+
+---
+
+### Option B: SAM Deployment (Recommended)
+
+SAM automatically packages Lambda code with dependencies — no manual zip/upload needed.
+
+#### Step 1: Build
+
+```bash
+cd sam-app
+sam build --template template.yaml
+```
+
+#### Step 2: Deploy
+
+```bash
+sam deploy \
+  --stack-name feature-relevance-poc \
+  --region <YOUR_REGION> \
+  --resolve-s3 \
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    "SlackWebhookUrl=https://hooks.slack.com/services/YOUR/WEBHOOK/URL" \
+    "BedrockModelId=us.anthropic.claude-sonnet-4-6" \
+    "KnowledgeBaseId=<YOUR_KB_ID_OR_EMPTY>" \
+  --no-confirm-changeset
+```
+
+#### Step 3: Create Workload Profiles
+
+Same as Option A Step 4 — use the WorkloadManager Lambda to add profiles.
+
+#### Step 4: Test
+
+```bash
+aws lambda invoke --function-name RSSIngestion-feature-relevance-poc \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"test_mode": true}' \
+  --region <YOUR_REGION> /tmp/test.json && cat /tmp/test.json
+```
+
+#### SAM Cleanup
+
+```bash
+sam delete --stack-name feature-relevance-poc --region <YOUR_REGION>
 ```
 
 ---
