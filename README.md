@@ -138,8 +138,8 @@ feature-relevance-poc/
 ## Deployment Guide
 
 There are two deployment options:
-- **Option A: CloudFormation** — Manual Lambda code deployment, more control
-- **Option B: SAM (recommended)** — Automatic Lambda packaging, dependency management, simpler workflow
+- **Option A: SAM (recommended)** — Automatic Lambda packaging, dependency management, simpler workflow
+- **Option B: CloudFormation** — Manual Lambda code deployment, more control
 
 ### Prerequisites
 
@@ -147,9 +147,95 @@ There are two deployment options:
 - An AWS account with Bedrock model access enabled (Claude Sonnet 4)
 - A Slack workspace with an Incoming Webhook configured
 - Python 3.12 (for diagram/doc generation scripts)
-- AWS SAM CLI (for Option B only — [install guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html))
+- AWS SAM CLI (for Option A — [install guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html))
 
-### Option A: CloudFormation Deployment
+### Option A: SAM Deployment (Recommended)
+
+SAM automatically packages Lambda code with dependencies — no manual zip/upload needed.
+
+#### Step 1: Build
+
+```bash
+cd sam-app
+sam build --template template.yaml
+```
+
+#### Step 2: Deploy
+
+```bash
+sam deploy \
+  --stack-name feature-relevance-poc \
+  --region <YOUR_REGION> \
+  --resolve-s3 \
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    "SlackWebhookUrl=https://hooks.slack.com/services/YOUR/WEBHOOK/URL" \
+    "BedrockModelId=us.anthropic.claude-sonnet-4-6" \
+    "KnowledgeBaseId=<YOUR_KB_ID_OR_EMPTY>" \
+  --no-confirm-changeset
+```
+
+#### Step 3: Create Workload Profiles
+
+```bash
+aws lambda invoke --function-name WorkloadManager-feature-relevance-poc \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{
+    "action": "create",
+    "profile": {
+      "workload_id": "my-workload-001",
+      "workload_name": "My Production Workload",
+      "customer": "My Customer",
+      "account_ids": ["123456789012"],
+      "business_unit": "Engineering",
+      "pod_owner": "Pod Alpha",
+      "pod_slack_channel": "#my-channel",
+      "workload_tier": "tier-0",
+      "free_text_description": "Describe your workload architecture here — what services, what scale, what matters, what the pain points are. The richer this description, the better Claude scores relevance.",
+      "key_services": ["Amazon EKS", "Amazon DynamoDB", "Amazon S3"]
+    }
+  }' \
+  --region <YOUR_REGION> /tmp/output.json
+```
+
+**Key fields:**
+
+| Field | Purpose |
+|-------|---------|
+| `workload_id` | Unique identifier (also used for KB metadata filtering) |
+| `key_services` | List of AWS services — used for keyword matching against announcements |
+| `free_text_description` | Rich architecture context — this is what Claude reads for deep scoring |
+| `workload_tier` | `tier-0` (threshold ≥25) or `standard` (threshold ≥40) |
+| `account_ids` | AWS account IDs shown in notifications |
+| `pod_slack_channel` | Slack channel for notification routing |
+
+#### Step 4: Test
+
+```bash
+aws lambda invoke --function-name RSSIngestion-feature-relevance-poc \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"test_mode": true}' \
+  --region <YOUR_REGION> /tmp/test.json && cat /tmp/test.json
+```
+
+#### Step 5: Verify
+
+- Check Step Functions console for execution status
+- Check Slack channel for the notification
+- Check CloudWatch Logs:
+```bash
+aws logs tail /aws/lambda/RelevanceScorer-feature-relevance-poc --follow --region <YOUR_REGION>
+```
+
+#### SAM Cleanup
+
+```bash
+sam delete --stack-name feature-relevance-poc --region <YOUR_REGION>
+```
+
+---
+
+### Option B: CloudFormation Deployment
 
 #### Step 1: Deploy Infrastructure
 
@@ -248,125 +334,24 @@ aws lambda update-function-configuration \
 
 #### Step 4: Create Workload Profiles
 
-Add workload profiles using the Workload Manager Lambda:
-
-```bash
-aws lambda invoke --function-name WorkloadManager-feature-relevance-poc \
-  --cli-binary-format raw-in-base64-out \
-  --payload '{
-    "action": "create",
-    "profile": {
-      "workload_id": "my-workload-001",
-      "workload_name": "My Production Workload",
-      "customer": "My Customer",
-      "account_ids": ["123456789012"],
-      "business_unit": "Engineering",
-      "pod_owner": "Pod Alpha",
-      "pod_slack_channel": "#my-channel",
-      "workload_tier": "tier-0",
-      "free_text_description": "Describe your workload architecture here — what services, what scale, what matters, what the pain points are. The richer this description, the better Claude scores relevance.",
-      "key_services": ["Amazon EKS", "Amazon DynamoDB", "Amazon S3"]
-    }
-  }' \
-  --region <YOUR_REGION> /tmp/output.json
-```
-
-**Key fields:**
-
-| Field | Purpose |
-|-------|---------|
-| `workload_id` | Unique identifier (also used for KB metadata filtering) |
-| `key_services` | List of AWS services — used for keyword matching against announcements |
-| `free_text_description` | Rich architecture context — this is what Claude reads for deep scoring |
-| `workload_tier` | `tier-0` (threshold ≥25) or `standard` (threshold ≥40) |
-| `account_ids` | AWS account IDs shown in notifications |
-| `pod_slack_channel` | Slack channel for notification routing |
+Same as Option A Step 3.
 
 #### Step 5: Test the Pipeline
-
-Trigger a test with a sample announcement:
 
 ```bash
 aws lambda invoke --function-name RSSIngestion-feature-relevance-poc \
   --cli-binary-format raw-in-base64-out \
   --payload '{"test_mode": true}' \
   --region <YOUR_REGION> /tmp/test.json && cat /tmp/test.json
-```
-
-Or trigger with a specific announcement:
-
-```bash
-aws lambda invoke --function-name RSSIngestion-feature-relevance-poc \
-  --cli-binary-format raw-in-base64-out \
-  --payload '{
-    "test_mode": true,
-    "announcement": {
-      "title": "Amazon EKS now supports Graviton4 instances",
-      "description": "EKS now supports Graviton4 with 30% better price-performance...",
-      "link": "https://aws.amazon.com/about-aws/whats-new/2026/07/...",
-      "pub_date": "Tue, 29 Jul 2026 14:00:00 GMT",
-      "categories": ["Amazon Elastic Kubernetes Service", "Compute"]
-    }
-  }' \
-  --region <YOUR_REGION> /tmp/test.json
 ```
 
 #### Step 6: Verify
 
 - Check Step Functions console for execution status
 - Check Slack channel for the notification
-- Check CloudWatch Logs for Lambda execution details:
+- Check CloudWatch Logs:
 ```bash
 aws logs tail /aws/lambda/RelevanceScorer-feature-relevance-poc --follow --region <YOUR_REGION>
-```
-
----
-
----
-
-### Option B: SAM Deployment (Recommended)
-
-SAM automatically packages Lambda code with dependencies — no manual zip/upload needed.
-
-#### Step 1: Build
-
-```bash
-cd sam-app
-sam build --template template.yaml
-```
-
-#### Step 2: Deploy
-
-```bash
-sam deploy \
-  --stack-name feature-relevance-poc \
-  --region <YOUR_REGION> \
-  --resolve-s3 \
-  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-  --parameter-overrides \
-    "SlackWebhookUrl=https://hooks.slack.com/services/YOUR/WEBHOOK/URL" \
-    "BedrockModelId=us.anthropic.claude-sonnet-4-6" \
-    "KnowledgeBaseId=<YOUR_KB_ID_OR_EMPTY>" \
-  --no-confirm-changeset
-```
-
-#### Step 3: Create Workload Profiles
-
-Same as Option A Step 4 — use the WorkloadManager Lambda to add profiles.
-
-#### Step 4: Test
-
-```bash
-aws lambda invoke --function-name RSSIngestion-feature-relevance-poc \
-  --cli-binary-format raw-in-base64-out \
-  --payload '{"test_mode": true}' \
-  --region <YOUR_REGION> /tmp/test.json && cat /tmp/test.json
-```
-
-#### SAM Cleanup
-
-```bash
-sam delete --stack-name feature-relevance-poc --region <YOUR_REGION>
 ```
 
 ---
